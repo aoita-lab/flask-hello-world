@@ -149,6 +149,9 @@ def self_test():
 
 @app.route("/verify")
 def verify():
+    import psycopg
+    from html import escape
+
     if not request.args:
         return page(
             "NFCタグから読み取ってください",
@@ -161,7 +164,11 @@ def verify():
         set(request.args) != {"picc_data", "cmac"}
         or any(len(request.args.getlist(k)) != 1 for k in request.args)
     ):
-        return page("認証できません", "URLの形式が正しくありません。", 400)
+        return page(
+            "認証できません",
+            "URLの形式が正しくありません。",
+            400
+        )
 
     data = request.args["picc_data"]
     signature = request.args["cmac"]
@@ -170,16 +177,24 @@ def verify():
         not re.fullmatch(r"[0-9a-fA-F]{32}", data)
         or not re.fullmatch(r"[0-9a-fA-F]{16}", signature)
     ):
-        return page("認証できません", "認証データの形式が正しくありません。", 400)
+        return page(
+            "認証できません",
+            "認証データの形式が正しくありません。",
+            400
+        )
 
     try:
         meta_key = load_key("SDM_META_READ_KEY")
         read_key = load_key("SDM_FILE_READ_KEY")
     except ValueError:
-        return page("設定が未完了です", "サーバーの秘密鍵設定を確認してください。", 503)
+        return page(
+            "設定が未完了です",
+            "サーバーの秘密鍵設定を確認してください。",
+            503
+        )
 
     try:
-        verify_sdm(
+        uid, counter = verify_sdm(
             bytes.fromhex(data),
             bytes.fromhex(signature),
             meta_key,
@@ -192,12 +207,79 @@ def verify():
             403
         )
 
-    return page(
-        "暗号の一致を確認しました",
-        "設定した秘密鍵による検証に成功しました。"
-        "<br>URLの再利用検出はまだ未実装です。"
-        "<br>現段階では、最終的な真贋判定は行いません。"
-    )
+    database_url = os.environ.get("DATABASE_URL")
+    if not database_url:
+        return page(
+            "認証を完了できません",
+            "データベースの接続先が未設定です。",
+            503
+        )
+
+    try:
+        with psycopg.connect(
+            database_url,
+            connect_timeout=5,
+            sslmode="require",
+            options="-c statement_timeout=5000"
+        ) as conn:
+            row = conn.execute(
+                """
+                SELECT product_name, last_counter, active
+                FROM public.nfc_tags
+                WHERE uid = %s
+                FOR UPDATE
+                """,
+                (uid,)
+            ).fetchone()
+
+            if row is None:
+                return page(
+                    "未登録のタグです",
+                    "暗号は一致しましたが、商品への登録がありません。",
+                    403
+                )
+
+            product_name, last_counter, active = row
+
+            if not active:
+                return page(
+                    "無効なタグです",
+                    "このタグは現在、認証対象から外れています。",
+                    403
+                )
+
+            if counter <= last_counter:
+                return page(
+                    "使用済みの認証情報です",
+                    "過去に認証した情報が送信されました。"
+                    "<br>商品にもう一度スマートフォンをかざしてください。",
+                    409
+                )
+
+            conn.execute(
+                """
+                UPDATE public.nfc_tags
+                SET last_counter = %s, updated_at = NOW()
+                WHERE uid = %s
+                """,
+                (counter, uid)
+            )
+
+        # データベースへの保存が完了してから成功を表示します。
+        return page(
+            "登録済みタグの認証に成功しました",
+            f"商品名：{escape(product_name)}"
+            f"<br>読み取り回数：{counter}"
+            "<br>暗号の一致と、保存済み回数より新しいことを確認しました。"
+        )
+
+    except psycopg.Error:
+        return page(
+            "認証を完了できません",
+            "読み取り履歴の確認・保存ができませんでした。"
+            "<br>時間をおいて、商品にもう一度かざしてください。",
+            503
+        )
 @app.route("/db-check")
 def db_check():
     import psycopg
