@@ -198,3 +198,24 @@ def verify():
         "<br>URLの再利用検出はまだ未実装です。"
         "<br>現段階では、最終的な真贋判定は行いません。"
     )
+            sslmode="require",
+            options="-c statement_timeout=5000"
+        ) as conn:
+            result = conn.execute("SELECT 1").fetchone()
+
+        if result != (1,):
+            return page("接続確認に失敗しました", "設定を確認してください。", 503)
+
+    except psycopg.Error:
+        return page(
+            "データベースに接続できません",
+            "DATABASE_URL、データベースの稼働状態、"
+            "Webサーバーと同じRegionかを確認してください。",
+            503
+        )
+
+    return page(
+        "データベース接続成功",
+        "Webサーバーからデータベースへの接続を確認しました。"
+        "<br>読み取り履歴の保存処理は、次に追加します。"
+    )
