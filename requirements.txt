@@ -1,3 +1,4 @@
 Flask
 Gunicorn
 pycryptodome
+psycopg[binary]
