@@ -198,6 +198,22 @@ def verify():
         "<br>URLの再利用検出はまだ未実装です。"
         "<br>現段階では、最終的な真贋判定は行いません。"
     )
+@app.route("/db-check")
+def db_check():
+    import psycopg
+
+    database_url = os.environ.get("DATABASE_URL")
+    if not database_url:
+        return page(
+            "接続先が未設定です",
+            "RenderのEnvironmentにDATABASE_URLを登録してください。",
+            503
+        )
+
+    try:
+        with psycopg.connect(
+            database_url,
+            connect_timeout=5,
             sslmode="require",
             options="-c statement_timeout=5000"
         ) as conn:
