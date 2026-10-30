@@ -235,3 +235,62 @@ def db_check():
         "Webサーバーからデータベースへの接続を確認しました。"
         "<br>読み取り履歴の保存処理は、次に追加します。"
     )
+@app.route("/db-setup", methods=["GET", "POST"])
+def db_setup():
+    import psycopg
+
+    if request.method == "GET":
+        return page(
+            "読み取り履歴の保存準備",
+            "下のボタンで、タグ情報を保存するテーブルを作成します。"
+            '<form method="post">'
+            '<button type="submit">保存用テーブルを作成</button>'
+            '</form>'
+        )
+
+    database_url = os.environ.get("DATABASE_URL")
+    if not database_url:
+        return page(
+            "接続先が未設定です",
+            "EnvironmentのDATABASE_URLを確認してください。",
+            503
+        )
+
+    try:
+        with psycopg.connect(
+            database_url,
+            connect_timeout=5,
+            sslmode="require",
+            options="-c statement_timeout=5000"
+        ) as conn:
+            conn.execute("""
+                CREATE TABLE IF NOT EXISTS public.nfc_tags (
+                    uid TEXT PRIMARY KEY
+                        CHECK (uid ~ '^[0-9A-F]{14}$'),
+                    product_name TEXT NOT NULL,
+                    last_counter INTEGER NOT NULL DEFAULT -1
+                        CHECK (last_counter BETWEEN -1 AND 16777215),
+                    active BOOLEAN NOT NULL DEFAULT TRUE,
+                    updated_at TIMESTAMPTZ NOT NULL DEFAULT NOW()
+                )
+            """)
+
+            conn.execute("""
+                SELECT uid, product_name, last_counter, active, updated_at
+                FROM public.nfc_tags
+                LIMIT 0
+            """)
+
+    except psycopg.Error:
+        return page(
+            "テーブルを準備できませんでした",
+            "データベースの接続設定と稼働状態を確認してください。",
+            503
+        )
+
+    return page(
+        "保存用テーブルの準備完了",
+        "タグ番号・商品名・最後に認証した読み取り回数を"
+        "保存する場所を用意しました。"
+        "<br>次に、認証処理と履歴保存を連携します。"
+    )
