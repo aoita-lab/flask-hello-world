@@ -147,8 +147,11 @@ def self_test():
     )
 
 
-@app.route("/verify")
+@app.route("/verify", methods=["GET", "POST"])
 def verify():
+    # HEADリクエストでは認証情報を消費しません。
+    if request.method == "HEAD":
+        return "", 200
     import psycopg
     from html import escape
 
@@ -206,7 +209,18 @@ def verify():
             "タグの設定と秘密鍵、または認証データを確認してください。",
             403
         )
-
+    # GETでは暗号の確認だけを行い、カウンターを更新しません。
+    if request.method == "GET":
+        action = escape(request.full_path, quote=True)
+        return page(
+            "タグの認証を開始します",
+            "下のボタンを押して、登録商品と認証情報を確認してください。"
+            f'<form method="post" action="{action}">'
+            '<button type="submit" '
+            'style="padding:14px 24px;font-size:18px;">'
+            '認証する</button>'
+            '</form>'
+        )
     database_url = os.environ.get("DATABASE_URL")
     if not database_url:
         return page(
